@@ -1,0 +1,6 @@
+012import pandas as pd
+
+df = pd.read_csv('input_file_0.csv')
+print(df.head())
+print(df.info())
+https://developers.google.com/issue-tracker/concepts/components#recent-componentsBienvenue sur le presse-papiers Gboard, tout texte que vous copiez sera enregistré ici.
