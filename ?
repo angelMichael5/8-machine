@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Prototype Numérique - Tunnel 8 Morse v2</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Style de base pour la pulsation lumineuse */
+        .pulse {
+            r: 5; /* Rayon */
+            filter: drop-shadow(0 0 4px white); /* Effet lumineux de base */
+            transition: fill 0.2s ease-in-out, filter 0.2s ease-in-out; /* Transition douce pour les changements */
+            /* Couleur et bordure initiales */
+            fill: yellow;
+            stroke: orange;
+            stroke-width: 1;
+        }
+
+        /* Styles spécifiques aux matériaux (appliqués dynamiquement via JS) */
+        .pulse-quartz {
+            fill: #a7f3d0; /* Vert pâle (couleur du chemin Quartz) */
+            stroke: #34d399; /* Vert plus soutenu */
+            filter: drop-shadow(0 0 5px #a7f3d0);
+        }
+        .pulse-silicon {
+            fill: #9ca3af; /* Gris (couleur du chemin Silicium) */
+            stroke: #6b7280; /* Gris plus soutenu */
+            filter: drop-shadow(0 0 5px #9ca3af);
+        }
+        .pulse-copper {
+            fill: #f59e0b; /* Orange/Ambre (couleur du chemin Cuivre) */
+            stroke: #d97706; /* Orange plus soutenu */
+            filter: drop-shadow(0 0 5px #f59e0b);
+        }
+
+
+        /* Styles pour les segments du tunnel (matériaux) */
+        #tunnel-path-quartz {
+            stroke: #a7f3d0; /* Vert pâle pour Quartz */
+            stroke-width: 6;
+            stroke-linecap: round;
+            fill: none;
+        }
+        #tunnel-path-silicon {
+            stroke: #9ca3af; /* Gris pour Silicium */
+            stroke-width: 6;
+            stroke-linecap: round;
+            fill: none;
+        }
+         #tunnel-path-copper-point {
+            /* Représenté par un cercle au croisement */
+            fill: #f59e0b; /* Orange/Ambre pour Cuivre */
+        }
+
+        /* Assurer que le SVG est responsive */
+        svg {
+            width: 100%;
+            max-width: 500px;
+            height: auto;
+            display: block;
+            margin: 0 auto;
+            overflow: visible;
+        }
+
+        body {
+             font-family: 'Inter', sans-serif;
+        }
+    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
+</head>
+<body class="bg-gray-900 text-white p-8 flex flex-col items-center min-h-screen">
+
+    <h1 class="text-3xl font-bold mb-6 text-center">Prototype Numérique - Tunnel 8 Morse</h1>
+
+    <div class="w-full max-w-md mb-6">
+        <label for="messageInput" class="block mb-2 text-sm font-medium text-gray-300">Entrez votre message :</label>
+        <input type="text" id="messageInput" class="bg-gray-700 border border-gray-600 text-white text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 placeholder-gray-400" placeholder="Ex: SOS" value="SOS">
+    </div>
+
+    <button id="startButton" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-4 rounded-lg mb-8 transition duration-300 ease-in-out shadow-md hover:shadow-lg active:bg-emerald-800 disabled:opacity-50 disabled:cursor-not-allowed">
+        Démarrer le Prototype
+    </button>
+
+    <div id="visualization" class="w-full max-w-xl bg-gray-800 p-4 rounded-lg shadow-inner">
+         <svg id="tunnelSvg" viewBox="0 0 400 400">
+            <path id="tunnel-path-quartz" d="M 100 200 C 100 100 300 100 300 200" />
+            <path id="tunnel-path-silicon" d="M 300 200 C 300 300 100 300 100 200" />
+            <circle id="tunnel-path-copper-point" cx="200" cy="200" r="6" />
+
+            <path id="animation-path" d="M 100 200 C 100 100 300 100 300 200 C 300 300 100 300 100 200 Z" fill="none" stroke="none" />
+
+            <circle id="lightPulse" class="pulse" cx="100" cy="200" style="visibility: hidden;"></circle>
+        </svg>
+    </div>
+
+    <div id="output" class="mt-6 text-center text-gray-400 text-sm min-h-[40px]">
+        <p id="status"></p>
+        <p id="processedMessage"></p>
+    </div>
+
+    <script>
+        // --- Configuration Morse ---
+        const morseCodeDict = {
+            'A': '.-', 'B': '-...', 'C': '-.-.', 'D': '-..', 'E': '.', 'F': '..-.', 'G': '--.',
+            'H': '....', 'I': '..', 'J': '.---', 'K': '-.-', 'L': '.-..', 'M': '--', 'N': '-.',
+            'O': '---', 'P': '.--.', 'Q': '--.-', 'R': '.-.', 'S': '...', 'T': '-', 'U': '..-',
+            'V': '...-', 'W': '.--', 'X': '-..-', 'Y': '-.--', 'Z': '--..',
+            '0': '-----', '1': '.----', '2': '..---', '3': '...--', '4': '....-', '5': '.....',
+            '6': '-....', '7': '--...', '8': '---..', '9': '----.',
+            ' ': '/' // Marqueur pour espace mot
+        };
+
+        // Unité de temps de base (durée d'un point) en ms
+        const timeUnit = 150;
+
+        // Durées standard Morse
+        const dotDuration = timeUnit;
+        const dashDuration = timeUnit * 3;
+        const intraLetterSpace = timeUnit; // Espace après chaque point/trait dans une lettre
+        const interLetterSpace = timeUnit * 3; // Espace total entre lettres (inclut l'intra-letter space final)
+        const wordSpace = timeUnit * 7;       // Espace total entre mots (inclut l'inter-letter space final)
+
+        // --- Éléments DOM ---
+        const messageInput = document.getElementById('messageInput');
+        const startButton = document.getElementById('startButton');
+        const lightPulse = document.getElementById('lightPulse');
+        const animationPath = document.getElementById('animation-path');
+        const statusElement = document.getElementById('status');
+        const processedMessageElement = document.getElementById('processedMessage');
+        const pathLength = animationPath.getTotalLength();
+
+        // --- Variables d'état ---
+        let animationFrameId = null;
+        let sequenceTimeoutId = null;
+        let isAnimating = false;
+
+        // --- Fonctions ---
+
+        /**
+         * Convertit le texte en une séquence d'éléments Morse avec durées.
+         * @param {string} text - Le texte à convertir.
+         * @returns {Array<object>} - Tableau d'objets { type: 'dot'|'dash'|'space', duration: number }.
+         */
+        function textToMorseSequence(text) {
+            let sequence = [];
+            text = text.toUpperCase().trim();
+            let morseString = ''; // Pour affichage
+
+            for (let i = 0; i < text.length; i++) {
+                const char = text[i];
+                const morseCode = morseCodeDict[char];
+
+                if (morseCode) {
+                    if (morseCode === '/') { // Espace mot
+                        // L'espace mot remplace l'espace inter-lettre précédent
+                        if (sequence.length > 0 && sequence[sequence.length - 1].type === 'space') {
+                            sequence[sequence.length - 1].duration = wordSpace;
+                        } else {
+                            sequence.push({ type: 'space', duration: wordSpace });
+                        }
+                        morseString += ' / ';
+                    } else {
+                        // Points et traits de la lettre
+                        for (let j = 0; j < morseCode.length; j++) {
+                            const symbol = morseCode[j];
+                            if (symbol === '.') {
+                                sequence.push({ type: 'dot', duration: dotDuration });
+                            } else if (symbol === '-') {
+                                sequence.push({ type: 'dash', duration: dashDuration });
+                            }
+                            morseString += symbol;
+                            // Ajouter espace intra-lettre (sauf si dernier symbole)
+                            if (j < morseCode.length - 1) {
+                                sequence.push({ type: 'space', duration: intraLetterSpace });
+                            }
+                        }
+                        // Ajouter espace inter-lettre (sauf si fin de message ou suivi d'un espace mot)
+                        if (i < text.length - 1 && text[i+1] !== ' ') {
+                             sequence.push({ type: 'space', duration: interLetterSpace });
+                             morseString += ' '; // Espace entre lettres pour affichage
+                        } else if (i === text.length - 1) {
+                            // Fin du message, pas d'espace après la dernière lettre
+                        }
+                    }
+                } else {
+                    console.warn(`Caractère non supporté: ${char}`);
+                    // Traiter caractère inconnu comme un espace mot
+                    if (sequence.length > 0 && sequence[sequence.length - 1].type === 'space') {
+                        sequence[sequence.length - 1].duration = wordSpace;
+                    } else {
+                        sequence.push({ type: 'space', duration: wordSpace });
+                    }
+                     morseString += ' / '; // Marqueur pour caractère inconnu
+                }
+            }
+            processedMessageElement.textContent = `Code Morse généré : ${morseString.trim()}`;
+            console.log("Séquence Morse Générée:", sequence);
+            return sequence;
+        }
+
+        /**
+         * Détermine le style de la pulsation en fonction de sa position sur le chemin.
+         * @param {number} progress - Progrès de l'animation (0 à 1).
+         */
+        function updatePulseStyle(progress) {
+            // Définir les zones approximatives pour chaque matériau sur le chemin en 8
+            // Le chemin commence à gauche (100, 200), va en haut (quartz), puis en bas (silicon), et revient.
+            // 0.0 - 0.45 : Boucle supérieure (Quartz)
+            // 0.45 - 0.55 : Zone de croisement (Cuivre)
+            // 0.55 - 1.0 : Boucle inférieure (Silicon)
+            lightPulse.classList.remove('pulse-quartz', 'pulse-silicon', 'pulse-copper');
+
+            if (progress >= 0 && progress < 0.45) {
+                lightPulse.classList.add('pulse-quartz');
+            } else if (progress >= 0.45 && progress < 0.55) {
+                 lightPulse.classList.add('pulse-copper');
+            } else if (progress >= 0.55 && progress <= 1.0) {
+                lightPulse.classList.add('pulse-silicon');
+            } else {
+                 // Style par défaut si hors limites (ne devrait pas arriver)
+                 lightPulse.style.fill = 'yellow';
+                 lightPulse.style.stroke = 'orange';
+            }
+        }
+
+
+        /**
+         * Anime la pulsation lumineuse le long du chemin SVG.
+         * @param {number} pulseDuration - Durée pendant laquelle la pulsation doit être visible et se déplacer.
+         * @param {function} onComplete - Callback à exécuter à la fin de l'animation du pulse.
+         */
+        function animatePulse(pulseDuration, onComplete) {
+            lightPulse.style.visibility = 'visible';
+            let startTime = null;
+            const animationDuration = pulseDuration; // La pulsation traverse le chemin pendant cette durée
+
+            function step(timestamp) {
+                 if (!isAnimating) return;
+                if (!startTime) startTime = timestamp;
+                const elapsed = timestamp - startTime;
+                // Le progrès est basé sur le temps écoulé par rapport à la durée du pulse (dot ou dash)
+                const progress = Math.min(elapsed / animationDuration, 1);
+
+                const currentLength = progress * pathLength;
+                const point = animationPath.getPointAtLength(currentLength);
+                lightPulse.setAttribute('cx', point.x);
+                lightPulse.setAttribute('cy', point.y);
+
+                // Mettre à jour le style de la pulsation basé sur la progression
+                updatePulseStyle(progress);
+
+                if (progress < 1) {
+                    animationFrameId = requestAnimationFrame(step);
+                } else {
+                    // Fin de l'animation du pulse
+                    lightPulse.style.visibility = 'hidden';
+                    // Réinitialiser le style et la position
+                    lightPulse.classList.remove('pulse-quartz', 'pulse-silicon', 'pulse-copper');
+                    const startPoint = animationPath.getPointAtLength(0);
+                    lightPulse.setAttribute('cx', startPoint.x);
+                    lightPulse.setAttribute('cy', startPoint.y);
+                    if (onComplete) onComplete();
+                }
+            }
+            cancelAnimationFrame(animationFrameId); // Annuler frame précédent
+            animationFrameId = requestAnimationFrame(step);
+        }
+
+        /**
+         * Exécute la séquence d'animations et de pauses Morse.
+         * @param {Array<object>} sequence - La séquence Morse générée.
+         */
+        function runSequence(sequence) {
+            let index = 0;
+            isAnimating = true;
+            startButton.disabled = true;
+            statusElement.textContent = "Prototype en cours...";
+
+            function next() {
+                if (!isAnimating || index >= sequence.length) {
+                    isAnimating = false;
+                    startButton.disabled = false;
+                    statusElement.textContent = isAnimating ? "Terminé." : "Arrêté.";
+                    lightPulse.style.visibility = 'hidden';
+                    console.log(isAnimating ? "Fin de la séquence." : "Animation arrêtée.");
+                    return;
+                }
+
+                const item = sequence[index];
+                index++;
+
+                clearTimeout(sequenceTimeoutId); // Annuler timeout précédent
+
+                if (item.type === 'dot' || item.type === 'dash') {
+                    animatePulse(item.duration, next);
+                } else if (item.type === 'space') {
+                    // Pendant les espaces, la pulsation est cachée
+                    lightPulse.style.visibility = 'hidden';
+                    sequenceTimeoutId = setTimeout(next, item.duration);
+                }
+            }
+            next(); // Démarrer la séquence
+        }
+
+         /**
+          * Arrête proprement l'animation en cours.
+          */
+        function stopAnimation() {
+            if (isAnimating) {
+                isAnimating = false;
+                clearTimeout(sequenceTimeoutId);
+                cancelAnimationFrame(animationFrameId);
+                sequenceTimeoutId = null;
+                animationFrameId = null;
+
+                lightPulse.style.visibility = 'hidden';
+                const startPoint = animationPath.getPointAtLength(0);
+                lightPulse.setAttribute('cx', startPoint.x);
+                lightPulse.setAttribute('cy', startPoint.y);
+                startButton.disabled = false;
+                statusElement.textContent = "Arrêté.";
+                console.log("Arrêt manuel demandé.");
+            }
+        }
+
+        // --- Écouteur d'événement ---
+        startButton.addEventListener('click', () => {
+            stopAnimation();
+            setTimeout(() => { // Petit délai pour assurer l'arrêt complet
+                const message = messageInput.value;
+                if (!message) {
+                    statusElement.textContent = "Veuillez entrer un message.";
+                    processedMessageElement.textContent = "";
+                    return;
+                }
+                const sequence = textToMorseSequence(message);
+                if (sequence.length > 0) {
+                    runSequence(sequence);
+                } else {
+                     statusElement.textContent = "Message vide ou invalide.";
+                     processedMessageElement.textContent = "";
+                }
+            }, 50);
+        });
+
+    </script>
+
+</body>
+</html>
+
